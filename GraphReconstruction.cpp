@@ -901,20 +901,193 @@ struct Problem
     }
 };
 
-class GraphReconstruction {
+class GraphReconstruction 
+{
 public:
-    vector<string> findSolution(int N, double C, int K, const vector<string>& paths)
-    {                     
+    struct PathDist
+    {
+        size_t from;
+        size_t to;
+        int dist;
+    };
+
+    vector<PathDist> path_dists;
+    size_t N;
+    double C;
+    size_t K;
+
+    struct EdgeDist
+    {
+        size_t to;
+        int dist;
+    };
+    vector<vector<EdgeDist>> connections;
+    Grid<bool> disconnected;
+
+    vector<string> findSolution(int aN, double aC, int aK, const vector<string>& paths)
+    {
+        N = aN;
+        C = aC;
+        K = aK;
+
+        path_dists.reserve(paths.size());
+        for (const string& path : paths)
+        {
+            stringstream strm(path);
+            PathDist pd;
+            strm >> pd.from >> pd.to >> pd.dist;
+            path_dists.push_back(pd);
+        }
+
+        make_islands();
+
         vector<string> out;
 
-        for (int i=0; i<N; i++)
+        for (size_t i=0; i<N; i++)
         {
             string row;
-            for (int k=0; k<N; k++) row+="1";
+            for (size_t k=0; k<N; k++) row+= disconnected[Pos(i,k)] ? "0" : "1";
             out.push_back(row);
         }
 
         return out;
+    }
+    
+    struct Island
+    {
+        vector<size_t> nodes;
+        size_t min_size;
+    };
+    vector<Island> islands;
+
+    void make_islands()
+    {
+        // initial connection information
+        connections.resize(N);
+        disconnected.init(N, N, false);
+        for (const PathDist& pd : path_dists)
+        {
+            if (pd.dist == -1)
+            {
+                disconnected[Pos(pd.from, pd.to)] = true;
+                disconnected[Pos(pd.to, pd.from)] = true;
+            }
+            else
+            {
+                connections[pd.from].push_back({ pd.to, pd.dist });
+                connections[pd.to].push_back({ pd.from, pd.dist });
+            }
+        }
+
+        // islands
+        vector<int> seen(N, 0);
+        for (size_t i = 0; i < N; i++)
+        {
+            if (seen[i])
+                continue;
+            Island island{ {i}, 0 };
+            seen[i] = 1;
+            deque<size_t> queue(1, i);
+            while (!queue.empty())
+            {
+                size_t n = queue.front();
+                queue.pop_front();
+                for (const EdgeDist& ed : connections[n])
+                {
+                    island.min_size = max(island.min_size, size_t(ed.dist + 1));
+                    if (seen[ed.to])
+                        continue;
+                    seen[ed.to] = 1;
+                    island.nodes.push_back(ed.to);
+                    queue.push_back(ed.to);
+                }
+            }
+            islands.push_back(island);
+        }
+
+        // disconnect definitely disconnected islands
+        size_t ni = islands.size();
+        for (size_t i = 0; i < ni - 1; i++)
+        {
+            for (size_t j = i + 1; j < ni; j++)
+            {
+                if (islands_disconnected(islands[i], islands[j]))
+                {
+                    disconnect_islands(islands[i], islands[j]);
+                }
+            }
+        }
+
+        // join islands that are too small
+        bool joined = true;
+        while (joined)
+        {
+            joined = false;
+            size_t ni = islands.size();
+            for (size_t i = 0; i < ni; i++)
+            {
+                Island& a = islands[i];
+                if (a.nodes.size() >= a.min_size)
+                    continue;
+                size_t bestj = N;
+                size_t best_extra = N;
+                size_t needed = a.min_size - a.nodes.size();
+                for (size_t j = 0; j < ni; j++)
+                {
+                    if (i == j)
+                        continue;
+                    Island& b = islands[j];
+                    if (islands_disconnected(a, b))
+                        continue;
+                    size_t extra = b.nodes.size();
+                    if (extra < best_extra || (extra <= needed && extra > best_extra))
+                    {
+                        best_extra = extra;
+                        bestj = j;
+                    }
+                }
+                if (bestj == N)
+                    continue;
+                joined = true;
+                Island& b = islands[bestj];
+                a.nodes.insert(a.nodes.end(), b.nodes.begin(), b.nodes.end());
+                a.min_size = max(a.min_size, b.min_size);
+                swap(b, islands.back());
+                islands.pop_back();
+                break;
+            }
+        }
+
+        // disconnect all remaining islands
+        ni = islands.size();
+        for (size_t i = 0; i < ni - 1; i++)
+        {
+            for (size_t j = i + 1; j < ni; j++)
+            {
+                disconnect_islands(islands[i], islands[j]);
+            }
+        }
+    }
+
+    bool islands_disconnected(const Island& a, const Island& b) const
+    {
+        for (size_t i : a.nodes)
+            for (size_t j : b.nodes)
+                if (disconnected[Pos(i, j)])
+                    return true;
+        return false;
+    }
+
+    void disconnect_islands(const Island& a, const Island& b)
+    {
+        for (size_t i : a.nodes)
+        {
+            for (size_t j : b.nodes)
+            {
+                disconnected[Pos(i, j)] = true;
+                disconnected[Pos(j, i)] = true;
+            }
+        }
     }
 };
 
@@ -953,9 +1126,10 @@ void stdio_main() {
     cin >> C;
     cin >> K;
     cin >> NumPaths;
+    getline(cin, path);
     for (int i=0; i<NumPaths; i++)
     {
-        cin >> path;
+        getline(cin, path);
         paths.push_back(path);
     }
     
@@ -966,10 +1140,24 @@ void stdio_main() {
     cout.flush();
 }
 
+void record(int argc, char** argv)
+{
+    ofstream out(argv[0]);
+    while (!cin.eof())
+    {
+        char ch;
+        cin >> ch;
+        out << ch;
+    }
+}
+
 int main(int argc, char** argv)
 {
+#ifdef TESTING_AT_HOME
     string mode = "local";
-//    string mode = "stdio";
+#else
+    string mode = "stdio";
+#endif
     if (argc > 1)
     {
         mode = argv[1];
@@ -980,6 +1168,8 @@ int main(int argc, char** argv)
         stdio_main();
     else if (mode == "local")
         local();
+    else if (mode == "record")
+        record(argc, argv);
     else
     {
         cout << "unrecognised mode " << mode << endl;
