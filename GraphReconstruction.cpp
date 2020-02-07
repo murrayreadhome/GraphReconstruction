@@ -940,6 +940,7 @@ public:
         }
 
         make_islands();
+        minimum_distances();
 
         vector<string> out;
 
@@ -1086,6 +1087,54 @@ public:
             {
                 disconnected[Pos(i, j)] = true;
                 disconnected[Pos(j, i)] = true;
+            }
+        }
+    }
+
+    Grid<int> min_dist;
+    void minimum_distances()
+    {
+        min_dist.init(N,N,1);
+        for (const Island& island : islands)
+        {
+            for (size_t n : island.nodes)
+            {
+                for (const EdgeDist& ed : connections[n])
+                {
+                    if (ed.dist <= 1)
+                        continue;
+                    disconnected[Pos(n, ed.to)] = true;
+                    disconnected[Pos(ed.to, n)] = true;
+                    propagate_min_dist(n, ed.to, ed.dist);
+                }
+            }
+        }
+    }
+
+    void propagate_min_dist(size_t from, size_t to, int dist)
+    {
+        deque<EdgeDist> queue(1, EdgeDist{from, 0});
+        while (!queue.empty())
+        {
+            EdgeDist ed = queue.front();
+            size_t f = ed.to;
+            int d = ed.dist;
+            queue.pop_front();
+            for (const EdgeDist& edge : connections[f])
+            {
+                int remaining = d - edge.dist;
+                if (remaining <= 1)
+                    continue;
+                disconnected[Pos(f, to)] = true;
+                disconnected[Pos(to, f)] = true;
+                int& mda = min_dist[Pos(f, to)];
+                int& mdb = min_dist[Pos(to, f)];
+                if (remaining > mda)
+                {
+                    mda = remaining;
+                    mdb = remaining;
+                }
+                queue.push_back({edge.to, remaining});
             }
         }
     }
