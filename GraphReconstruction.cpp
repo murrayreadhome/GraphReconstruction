@@ -897,6 +897,8 @@ struct Problem
         //compute the F1 score
         double Score = (Precision + Recall < 1e-9 ? 0 : (2 * Precision * Recall)/(Precision + Recall));
 
+        cout << "TN=" << TN << " FP=" << FP << " FN=" << FN << " TP=" << TP << " ";
+
         return Score;
     }
 };
@@ -915,6 +917,8 @@ public:
     size_t N;
     double C;
     size_t K;
+
+    mt19937 re;
 
     struct EdgeDist
     {
@@ -941,6 +945,7 @@ public:
 
         make_islands();
         minimum_distances();
+        optimise_islands();
 
         vector<string> out;
 
@@ -958,6 +963,7 @@ public:
     {
         vector<size_t> nodes;
         size_t min_size;
+        vector<PathDist> paths;
     };
     vector<Island> islands;
 
@@ -1068,6 +1074,21 @@ public:
                 disconnect_islands(islands[i], islands[j]);
             }
         }
+
+        // Add the relevant paths
+        for (Island& island : islands)
+        {
+            sort(island.nodes.begin(), island.nodes.end());
+            for (size_t n : island.nodes)
+            {
+                for (const EdgeDist& ed : connections[n])
+                {
+                    if (n>ed.to || ed.dist==-1)
+                        continue;
+                    island.paths.push_back({n, ed.to, ed.dist});
+                }
+            }
+        }
     }
 
     bool islands_disconnected(const Island& a, const Island& b) const
@@ -1137,6 +1158,67 @@ public:
                 queue.push_back({edge.to, remaining});
             }
         }
+    }
+
+    void optimise_islands()
+    {
+        // TODO allocate time by island size
+        for (Island& island : islands)
+            optimise_island(island);
+    }
+
+    void optimise_island(const Island& island)
+    {
+        // initially all nodes are connected, except those we know can't be
+        // how to optimise?
+        // eliminate edges randomly
+        // track which ones break the rules (cause disconnect or greater path)
+        // stop when all rules are matched exactly, or no more edges can be removed
+        // redo until timeout, keep best
+        size_t M = island.nodes.size();
+        vector<Pos> removable;
+        for (size_t i : island.nodes)
+            for (size_t j : island.nodes)
+                if (i<j && !disconnected[Pos(i,j)])
+                    removable.push_back(Pos(i,j));
+        // todo track what was disconnected and restore it for a retry
+        bool rules_satisfied = false;
+        while (!removable.empty() && !rules_satisfied)
+        {
+            swap(removable[re() % removable.size()], removable.back());
+            Pos remove = removable.back();
+            removable.pop_back();
+            bool ok = can_remove(island, remove, rules_satisfied);
+            if (!ok)
+            {
+                rules_satisfied = false;
+                disconnected[remove] = false;
+                disconnected[remove.swapped()] = false;
+            }
+        }
+    }
+
+    bool can_remove(const Island& island, const Pos& pos, bool& satisfied)
+    {
+        disconnected[pos] = true;
+        disconnected[pos.swapped()] = true;
+
+        // APSP
+        // todo calculate
+        int DISCONNECT = N;
+        Grid<int> apsp(N,N,DISCONNECT);  // todo optimise
+
+        satisfied = true;
+        for (const PathDist& pd : island.paths)
+        {
+            int sp = apsp[Pos(pd.from, pd.to)];
+            if (sp != pd.dist)
+                satisfied = false;
+            if (sp > pd.dist)
+                return false;
+        }
+
+        return true;
     }
 };
 
