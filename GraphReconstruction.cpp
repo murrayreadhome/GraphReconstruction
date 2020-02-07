@@ -972,6 +972,8 @@ public:
         // initial connection information
         connections.resize(N);
         disconnected.init(N, N, false);
+        for (size_t i = 0; i < N; i++)
+            disconnected[Pos(i, i)] = true;
         for (const PathDist& pd : path_dists)
         {
             if (pd.dist == -1)
@@ -1158,6 +1160,7 @@ public:
                 queue.push_back({edge.to, remaining});
             }
         }
+        // todo add these soft constraints to islands
     }
 
     void optimise_islands()
@@ -1182,13 +1185,18 @@ public:
                 if (i<j && !disconnected[Pos(i,j)])
                     removable.push_back(Pos(i,j));
         // todo track what was disconnected and restore it for a retry
+        // totry identify troublesome edges and leave the rest alone? 
+        shuffle(removable.begin(), removable.end(), re);
         bool rules_satisfied = false;
+        bool ok_at_start = check_constraints(island, rules_satisfied);
+        if (!ok_at_start) cerr << "not ok at start??!" << endl;
         while (!removable.empty() && !rules_satisfied)
         {
-            swap(removable[re() % removable.size()], removable.back());
             Pos remove = removable.back();
             removable.pop_back();
-            bool ok = can_remove(island, remove, rules_satisfied);
+            disconnected[remove] = true;
+            disconnected[remove.swapped()] = true;
+            bool ok = check_constraints(island, rules_satisfied);
             if (!ok)
             {
                 rules_satisfied = false;
@@ -1198,15 +1206,47 @@ public:
         }
     }
 
-    bool can_remove(const Island& island, const Pos& pos, bool& satisfied)
+    bool check_constraints(const Island& island, bool& satisfied)
     {
-        disconnected[pos] = true;
-        disconnected[pos.swapped()] = true;
-
         // APSP
         // todo calculate
         int DISCONNECT = N;
         Grid<int> apsp(N,N,DISCONNECT);  // todo optimise
+
+        vector<vector<size_t>> edges(N);
+        for (size_t i : island.nodes)
+            for (size_t j : island.nodes)
+                if (!disconnected[{i, j}])
+                    edges[i].push_back(j);
+
+        vector<int> seen;
+        vector<size_t> now, next;
+        for (size_t i : island.nodes)
+        {
+            seen.clear();
+            seen.resize(N, 0);
+            seen[i] = 1;
+            now.clear();
+            now.push_back(i);
+            int dist = 1;
+            while (!now.empty())
+            {
+                next.clear();
+                for (size_t j : now)
+                {
+                    for (size_t k : edges[j])
+                    {
+                        if (seen[k])
+                            continue;
+                        seen[k] = 1;
+                        next.push_back(k);
+                        apsp[{i, k}] = dist;
+                    }
+                }
+                dist++;
+                now.swap(next);
+            }
+        }
 
         satisfied = true;
         for (const PathDist& pd : island.paths)
