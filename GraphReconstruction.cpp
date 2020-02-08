@@ -27,7 +27,7 @@ using namespace std;
 #define TIME_LIMIT 100000
 #define MIN_STEPS 0
 #else
-#define TIME_LIMIT 8000
+#define TIME_LIMIT 1000
 #define MIN_STEPS 0
 #endif
 #else
@@ -930,6 +930,8 @@ public:
 
     vector<string> findSolution(int aN, double aC, int aK, const vector<string>& paths)
     {
+        milliseconds(true);
+
         N = aN;
         C = aC;
         K = aK;
@@ -978,8 +980,7 @@ public:
         {
             if (pd.dist == -1)
             {
-                disconnected[Pos(pd.from, pd.to)] = true;
-                disconnected[Pos(pd.to, pd.from)] = true;
+                disconnect(Pos(pd.from, pd.to), true);
             }
             else
             {
@@ -1108,8 +1109,7 @@ public:
         {
             for (size_t j : b.nodes)
             {
-                disconnected[Pos(i, j)] = true;
-                disconnected[Pos(j, i)] = true;
+                disconnect(Pos(i, j), true);
             }
         }
     }
@@ -1126,8 +1126,7 @@ public:
                 {
                     if (ed.dist <= 1)
                         continue;
-                    disconnected[Pos(n, ed.to)] = true;
-                    disconnected[Pos(ed.to, n)] = true;
+                    disconnect(Pos(n, ed.to), true);
                     propagate_min_dist(n, ed.to, ed.dist);
                 }
             }
@@ -1148,8 +1147,7 @@ public:
                 int remaining = d - edge.dist;
                 if (remaining <= 1)
                     continue;
-                disconnected[Pos(f, to)] = true;
-                disconnected[Pos(to, f)] = true;
+                disconnect(Pos(f, to), true);
                 int& mda = min_dist[Pos(f, to)];
                 int& mdb = min_dist[Pos(to, f)];
                 if (remaining > mda)
@@ -1165,12 +1163,147 @@ public:
 
     void optimise_islands()
     {
-        // TODO allocate time by island size
+        vector<double> island_rel;
         for (Island& island : islands)
-            optimise_island(island);
+            island_rel.push_back(pow(double(island.nodes.size()), 4));
+        double tot = accumulate(ALL(island_rel), 0.0);
+        for (size_t i=0; i<islands.size(); i++)
+        {
+            const Island& island = islands[i];
+            optimise_island_1(island);
+            optimise_island(island, int(TIME_LIMIT * island_rel[i] / tot));
+        }
+    }
+    
+    struct Change
+    {
+        Pos added;
+        Pos removed;
+    };
+
+    const Pos no_pos = { 1000, 1000 };
+
+    void optimise_island(const Island& island, int time_limit)
+    {
+        vector<Pos> present;
+        for (size_t i : island.nodes)
+            for (size_t j : island.nodes)
+                if (i < j && !disconnected[Pos(i, j)])
+                    present.push_back(Pos(i, j));
+        vector<Pos> removed;
+        // mutate by moving edged between present and removed
+        
+        vector<Pos> best_present = present;
+        vector<Pos> best_removed = removed;
+        double best_score = score_island(island);
+
+        size_t M = island.nodes.size();
+        while (best_score > 0 && milliseconds() < time_limit)
+        {
+            Change change = random_mutation(present, removed);
+            double score = score_island(island);
+            if (score <= best_score)
+            {
+                best_score = score;
+                best_present = present;
+                best_removed = removed;
+            }
+            else
+                undo(change, present, removed);
+        }
+        //cout << best_score << " " << island.nodes.size() << endl;
+
+        apply_present(island, best_present, best_removed);
     }
 
-    void optimise_island(const Island& island)
+    double score_island(const Island& island)
+    {
+        calc_apsp(island);
+        double score = 0;
+        for (const PathDist& pd : island.paths)
+        {
+            int sp = apsp[Pos(pd.from, pd.to)];
+            int err = sp - pd.dist;
+            score += err * err;
+        }
+        return score;
+    }
+
+    Change random_mutation(vector<Pos>& present, vector<Pos>& removed)
+    {
+        Change change{ no_pos, no_pos };
+
+        auto remove_random = [this](vector<Pos>& v)
+        {
+            if (v.empty())
+                return no_pos;
+            swap(v[re() % v.size()], v.back());
+            Pos p = v.back();
+            v.pop_back();
+            return p;
+        };
+
+        switch (re() % 3)
+        {
+        case 0:
+            change.removed = remove_random(present);
+            break;
+        case 1:
+            change.added = remove_random(removed);
+            break;
+        case 2:
+            change.removed = remove_random(present);
+            change.added = remove_random(removed);
+            break;
+        }
+
+        if (change.added != no_pos)
+        {
+            present.push_back(change.added);
+            disconnect(change.added, false);
+        }
+        if (change.removed != no_pos)
+        {
+            removed.push_back(change.removed);
+            disconnect(change.removed, true);
+        }
+
+        return change;
+    }
+
+    void disconnect(const Pos& p, bool disconnection)
+    {
+        disconnected[p] = disconnection;
+        disconnected[p.swapped()] = disconnection;
+    }
+
+    void undo(const Change& change, vector<Pos>& present, vector<Pos>& removed)
+    {
+        if (change.added != no_pos)
+            present.pop_back();
+        if (change.removed != no_pos)
+        {
+            removed.pop_back();
+            present.push_back(change.removed);
+            disconnect(change.removed, false);
+        }
+        if (change.added != no_pos)
+        {
+            removed.push_back(change.added);
+            disconnect(change.added, true);
+        }
+    }
+
+    void apply_present(const Island& island, const vector<Pos>& present, const vector<Pos>& removed)
+    {
+        for (const Pos& p : present)
+            disconnect(p, false);
+        for (const Pos& p : removed)
+            disconnect(p, true);
+    }
+
+
+    void optimise_island_1(const Island& island)
     {
         // initially all nodes are connected, except those we know can't be
         // how to optimise?
@@ -1178,6 +1311,8 @@ public:
         // track which ones break the rules (cause disconnect or greater path)
         // stop when all rules are matched exactly, or no more edges can be removed
         // redo until timeout, keep best
+        // this never satisfies a non trivial rules set
+        // COULD MAYBE... evaluate how badly the constraints are broken, and SA to improve that down to zero?
         size_t M = island.nodes.size();
         vector<Pos> removable;
         for (size_t i : island.nodes)
@@ -1194,24 +1329,22 @@ public:
         {
             Pos remove = removable.back();
             removable.pop_back();
-            disconnected[remove] = true;
-            disconnected[remove.swapped()] = true;
+            disconnect(remove, true);
             bool ok = check_constraints(island, rules_satisfied);
             if (!ok)
             {
                 rules_satisfied = false;
-                disconnected[remove] = false;
-                disconnected[remove.swapped()] = false;
+                disconnect(remove, false);
             }
         }
+        //cerr << rules_satisfied << " " << island.nodes.size() << endl;
     }
 
-    bool check_constraints(const Island& island, bool& satisfied)
+    Grid<int> apsp;  // todo optimise
+
+    void calc_apsp(const Island& island)
     {
-        // APSP
-        // todo calculate
-        int DISCONNECT = N;
-        Grid<int> apsp(N,N,DISCONNECT);  // todo optimise
+        apsp.init(N, N, island.nodes.size()+1);  // todo optimise
 
         vector<vector<size_t>> edges(N);
         for (size_t i : island.nodes)
@@ -1247,6 +1380,11 @@ public:
                 now.swap(next);
             }
         }
+    }
+
+    bool check_constraints(const Island& island, bool& satisfied)
+    {
+        calc_apsp(island);
 
         satisfied = true;
         for (const PathDist& pd : island.paths)
