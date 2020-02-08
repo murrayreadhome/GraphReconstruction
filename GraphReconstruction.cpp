@@ -24,7 +24,7 @@ using namespace std;
 
 #ifdef TESTING_AT_HOME
 #ifdef _DEBUG
-#define TIME_LIMIT 100000
+#define TIME_LIMIT 10000
 #define MIN_STEPS 0
 #else
 #define TIME_LIMIT 1000
@@ -903,6 +903,8 @@ struct Problem
     }
 };
 
+uniform_real_distribution<double>r01(0.0, 1.0);
+
 class GraphReconstruction 
 {
 public:
@@ -1169,6 +1171,8 @@ public:
         double tot = accumulate(ALL(island_rel), 0.0);
         for (size_t i=0; i<islands.size(); i++)
         {
+            if (i > 0)
+                island_rel[i] += island_rel[i - 1];
             const Island& island = islands[i];
             optimise_island_1(island);
             optimise_island(island, int(TIME_LIMIT * island_rel[i] / tot));
@@ -1186,11 +1190,21 @@ public:
     void optimise_island(const Island& island, int time_limit)
     {
         vector<Pos> present;
-        for (size_t i : island.nodes)
-            for (size_t j : island.nodes)
-                if (i < j && !disconnected[Pos(i, j)])
-                    present.push_back(Pos(i, j));
         vector<Pos> removed;
+        for (size_t i : island.nodes)
+        {
+            for (size_t j : island.nodes)
+            {
+                Pos p(i, j);
+                if (i < j && min_dist[p] == 1)
+                {
+                    if (disconnected[p])
+                        removed.push_back(p);
+                    else
+                        present.push_back(p);
+                }
+            }
+        }
         // mutate by moving edged between present and removed
         
         vector<Pos> best_present = present;
@@ -1200,7 +1214,12 @@ public:
         size_t M = island.nodes.size();
         while (best_score > 0 && milliseconds() < time_limit)
         {
-            Change change = random_mutation(present, removed);
+            bool random = re() % 2;
+            Change change;
+            if (random)
+                change = random_mutation(present, removed);
+            else
+                change = targetted_change(island, present, removed);
             double score = score_island(island);
             if (score <= best_score)
             {
@@ -1214,6 +1233,134 @@ public:
         //cout << best_score << " " << island.nodes.size() << endl;
 
         apply_present(island, best_present, best_removed);
+    }
+
+    Change targetted_change(const Island& island, vector<Pos>& present, vector<Pos>& removed)
+    {
+        calc_apsp(island);
+        PathDist path_dist;
+        int bad_count = 0;
+        for (const PathDist& pd : island.paths)
+        {
+            int sp = apsp[Pos(pd.from, pd.to)];
+            if (sp != pd.dist)
+            {
+                bad_count++;
+                if (r01(re) < 1.0 / bad_count)
+                    path_dist = pd;
+            }
+        }
+
+        if (!bad_count)
+            return { no_pos, no_pos };
+
+        if (apsp[Pos(path_dist.from, path_dist.to)] > path_dist.dist)
+            return shorten(island, path_dist, present, removed);
+        else
+            return lengthen(island, path_dist, present, removed);
+    }
+
+    Change shorten(const Island& island, const PathDist& path_dist, vector<Pos>& present, vector<Pos>& removed)
+    {
+        vector<PathDist> from_steps;
+        get_steps(island, path_dist.from, path_dist.to, from_steps);
+        vector<PathDist> to_steps;
+        get_steps(island, path_dist.to, path_dist.from, to_steps);
+        // pick a random join that sets the right length
+
+        int count = 0;
+        int best_err = 1000;
+        Pos to_add;
+        for (const PathDist& from_step : from_steps)
+        {
+            for (const PathDist& to_step : to_steps)
+            {
+                Pos p{ from_step.to, to_step.to };
+                if (min_dist[p] > 1)
+                    continue;
+                int join_dist = from_step.dist + to_step.dist + 1;
+                int err = abs(join_dist - path_dist.dist);
+                if (err < best_err)
+                {
+                    best_err = err;
+                    count = 0;
+                }
+                if (err == best_err)
+                {
+                    count++;
+                    if (r01(re) < 1.0 / count)
+                        to_add = p;
+                }
+            }
+        }
+        if (!count)
+            return { no_pos, no_pos };
+        if (to_add.x > to_add.y)
+            to_add = to_add.swapped();
+        auto where = find(ALL(removed), to_add);
+        swap(*where, removed.back());
+        removed.pop_back();
+        present.push_back(to_add);
+        disconnect(to_add, false);
+        return { to_add, no_pos };
+    }
+
+    Change lengthen(const Island& island, const PathDist& path_dist, vector<Pos>& present, vector<Pos>& removed)
+    {
+        vector<PathDist> steps;
+        get_steps(island, path_dist.from, path_dist.to, steps);
+        // pick a random path element to remove
+        PathDist to_remove;
+        int count = 0;
+        for (const PathDist& step : steps)
+        {
+            if (step.dist <= path_dist.dist && step.dist != 0)
+            {
+                count++;
+                if (r01(re) < 1.0 / count)
+                    to_remove = step;
+            }
+        }
+        Pos r{ to_remove.from, to_remove.to };
+        if (r.x > r.y)
+            r = r.swapped();
+        auto where = find(ALL(present), r);
+        swap(*where, present.back());
+        present.pop_back();
+        removed.push_back(r);
+        disconnect(r, true);
+        return { no_pos, r };
+    }
+
+    void get_steps(const Island& island, size_t from, size_t to, vector<PathDist>& steps)
+    {
+        steps.clear();
+        steps.push_back({ from, from, 0 });
+        vector<int> seen(N, N);
+        seen[from] = from;
+        vector<size_t> now, next;
+        now.push_back(from);
+        int dist = 1;
+        while (!now.empty())
+        {
+            next.clear();
+            for (size_t f : now)
+            {
+                for (size_t to = 0; to < N; to++)
+                {
+                    if (seen[to] < dist)
+                        continue;
+                    if (disconnected[{from, to}])
+                        continue;
+                    steps.push_back({ f,to,dist });
+                    if (seen[to] > dist)
+                        next.push_back(to);
+                    seen[to] = dist;
+                }
+            }
+            dist++;
+            now.swap(next);
+        }
     }
 
     double score_island(const Island& island)
@@ -1280,9 +1427,15 @@ public:
     void undo(const Change& change, vector<Pos>& present, vector<Pos>& removed)
     {
         if (change.added != no_pos)
+        {
+            if (change.added != present.back())
+                report("undo remove fail");
             present.pop_back();
+        }
         if (change.removed != no_pos)
         {
+            if (change.removed != removed.back())
+                report("undo remove fail");
             removed.pop_back();
             present.push_back(change.removed);
             disconnect(change.removed, false);
