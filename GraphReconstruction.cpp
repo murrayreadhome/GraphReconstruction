@@ -897,7 +897,7 @@ struct Problem
         //compute the F1 score
         double Score = (Precision + Recall < 1e-9 ? 0 : (2 * Precision * Recall)/(Precision + Recall));
 
-        cout << "TN=" << TN << " FP=" << FP << " FN=" << FN << " TP=" << TP << " ";
+        //cout << " TN=" << TN << " FP=" << FP << " FN=" << FN << " TP=" << TP << " ";
 
         return Score;
     }
@@ -919,6 +919,8 @@ public:
     size_t N;
     double C;
     size_t K;
+    size_t max_edges;
+    double target_num_connected;
 
     mt19937 re;
 
@@ -927,7 +929,7 @@ public:
         size_t to;
         int dist;
     };
-    vector<vector<EdgeDist>> connections;
+    vector<vector<EdgeDist>> constraint_connections;
     Grid<bool> disconnected;
 
     vector<string> findSolution(int aN, double aC, int aK, const vector<string>& paths)
@@ -937,6 +939,9 @@ public:
         N = aN;
         C = aC;
         K = aK;
+
+        max_edges = N * (N - 1);
+        target_num_connected = max_edges * C;
 
         path_dists.reserve(paths.size());
         for (const string& path : paths)
@@ -968,13 +973,14 @@ public:
         vector<size_t> nodes;
         size_t min_size;
         vector<PathDist> paths;
+        vector<PathDist> min_dists;
     };
     vector<Island> islands;
 
     void make_islands()
     {
         // initial connection information
-        connections.resize(N);
+        constraint_connections.resize(N);
         disconnected.init(N, N, false);
         for (size_t i = 0; i < N; i++)
             disconnected[Pos(i, i)] = true;
@@ -986,8 +992,8 @@ public:
             }
             else
             {
-                connections[pd.from].push_back({ pd.to, pd.dist });
-                connections[pd.to].push_back({ pd.from, pd.dist });
+                constraint_connections[pd.from].push_back({ pd.to, pd.dist });
+                constraint_connections[pd.to].push_back({ pd.from, pd.dist });
             }
         }
 
@@ -1004,7 +1010,7 @@ public:
             {
                 size_t n = queue.front();
                 queue.pop_front();
-                for (const EdgeDist& ed : connections[n])
+                for (const EdgeDist& ed : constraint_connections[n])
                 {
                     island.min_size = max(island.min_size, size_t(ed.dist + 1));
                     if (seen[ed.to])
@@ -1086,7 +1092,7 @@ public:
             sort(island.nodes.begin(), island.nodes.end());
             for (size_t n : island.nodes)
             {
-                for (const EdgeDist& ed : connections[n])
+                for (const EdgeDist& ed : constraint_connections[n])
                 {
                     if (n>ed.to || ed.dist==-1)
                         continue;
@@ -1117,25 +1123,43 @@ public:
     }
 
     Grid<int> min_dist;
+    Grid<bool> known_dist;
     void minimum_distances()
     {
-        min_dist.init(N,N,1);
-        for (const Island& island : islands)
+        min_dist.init(N, N, 1);
+        known_dist.init(N, N, false);
+        for (Island& island : islands)
         {
+            for (const PathDist& pd : island.paths)
+            {
+                min_dist[{pd.from, pd.to}] = pd.dist;
+                min_dist[{pd.to, pd.from}] = pd.dist;
+                known_dist[{pd.from, pd.to}] = true;
+                known_dist[{pd.to, pd.from}] = true;
+            }
             for (size_t n : island.nodes)
             {
-                for (const EdgeDist& ed : connections[n])
+                for (const EdgeDist& ed : constraint_connections[n])
                 {
                     if (ed.dist <= 1)
                         continue;
                     disconnect(Pos(n, ed.to), true);
-                    propagate_min_dist(n, ed.to, ed.dist);
+                    propagate_min_dist(island, n, ed.to, ed.dist);
+                }
+            }
+            for (size_t n : island.nodes)
+            {
+                for (size_t m : island.nodes)
+                {
+                    int d = min_dist[{n, m}];
+                    if (d > 1 && !known_dist[{n, m}])
+                        island.min_dists.push_back({ n, m, d });
                 }
             }
         }
     }
 
-    void propagate_min_dist(size_t from, size_t to, int dist)
+    void propagate_min_dist(Island& island, size_t from, size_t to, int dist)
     {
         deque<EdgeDist> queue(1, EdgeDist{from, 0});
         while (!queue.empty())
@@ -1144,31 +1168,34 @@ public:
             size_t f = ed.to;
             int d = ed.dist;
             queue.pop_front();
-            for (const EdgeDist& edge : connections[f])
+            for (const EdgeDist& edge : constraint_connections[f])
             {
-                int remaining = d - edge.dist;
+                size_t n = edge.to;
+                int travelled = d + edge.dist;
+                int remaining = dist - travelled;
                 if (remaining <= 1)
                     continue;
-                disconnect(Pos(f, to), true);
-                int& mda = min_dist[Pos(f, to)];
-                int& mdb = min_dist[Pos(to, f)];
+                disconnect(Pos(n, to), true);
+                int& mda = min_dist[Pos(n, to)];
+                int& mdb = min_dist[Pos(to, n)];
                 if (remaining > mda)
                 {
                     mda = remaining;
                     mdb = remaining;
+                    queue.push_back({ n, travelled });
                 }
-                queue.push_back({edge.to, remaining});
             }
         }
-        // todo add these soft constraints to islands
     }
 
+    int opt_iter;
     void optimise_islands()
     {
         vector<double> island_rel;
         for (Island& island : islands)
             island_rel.push_back(pow(double(island.nodes.size()), 4));
         double tot = accumulate(ALL(island_rel), 0.0);
+        opt_iter = 0;
         for (size_t i=0; i<islands.size(); i++)
         {
             if (i > 0)
@@ -1177,8 +1204,39 @@ public:
             optimise_island_1(island);
             optimise_island(island, int(TIME_LIMIT * island_rel[i] / tot));
         }
+        //report_constraints();
+        //cerr << " it=" << opt_iter;
     }
     
+    void report_constraints()
+    {
+        int sat = 0, unsat = 0;
+        for (const Island& island : islands)
+        {
+            calc_apsp(island);
+
+            for (const PathDist& pd : island.paths)
+            {
+                int sp = apsp[Pos(pd.from, pd.to)];
+                cerr << pd.from << " " << pd.to << " " << pd.dist << " " << sp << endl;
+                if (sp == pd.dist)
+                    sat++;
+                else
+                    unsat++;
+            }
+            for (const PathDist& pd : island.min_dists)
+            {
+                int sp = apsp[Pos(pd.from, pd.to)];
+                cerr << "MD " << pd.from << " " << pd.to << " " << pd.dist << " " << sp << endl;
+                if (sp >= pd.dist)
+                    sat++;
+                else
+                    unsat++;
+            }
+        }
+        cerr << "sat=" << sat << " unsat=" << unsat << endl;
+    }
+
     struct Change
     {
         Pos added;
@@ -1214,6 +1272,7 @@ public:
         size_t M = island.nodes.size();
         while (best_score > 0 && milliseconds() < time_limit)
         {
+            opt_iter++;
             bool random = re() % 2;
             Change change;
             if (random)
@@ -1373,7 +1432,16 @@ public:
             int err = sp - pd.dist;
             score += err * err;
         }
+        //score += fraction_score();
         return score;
+    }
+
+    double fraction_score()
+    {
+        size_t edges = count(disconnected.begin(), disconnected.end(), 0);
+        double f_connected = edges * 1.0 / max_edges;
+        double diff = abs(f_connected - target_num_connected);
+        return diff / target_num_connected;
     }
 
     Change random_mutation(vector<Pos>& present, vector<Pos>& removed)
@@ -1570,10 +1638,31 @@ double eval(int n)
     return eval(Problem(n));
 }
 
+double last_score[] =
+{
+    0.100917,
+1,
+0.395604,
+0.315068,
+0.181818,
+1,
+0.168224,
+0.828571,
+0.767857,
+0.271186,
+};
+
 void local()
 {
-    for (int i=0; i<10; i++)
-        cout << eval(i) << endl;
+    double rel = 0;
+    int n = 10;
+    for (int i = 0; i < n; i++)
+    {
+        double sc = eval(i);
+        cout << sc << "," << endl;
+        rel += sc / last_score[i];
+    }
+    cout << rel/n << endl;
 }
 
 void stdio_main() {

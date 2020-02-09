@@ -1,0 +1,4 @@
+try
+node swap mutations (will need a change type record)
+soft constraints on min distances
+maybe soft constraints on max dist
