@@ -898,6 +898,7 @@ struct Problem
         double Score = (Precision + Recall < 1e-9 ? 0 : (2 * Precision * Recall)/(Precision + Recall));
 
         //cout << " TN=" << TN << " FP=" << FP << " FN=" << FN << " TP=" << TP << " ";
+        cout << " N=" << N << " C=" << C*N << " K=" << K << " ";
 
         return Score;
     }
@@ -1201,11 +1202,12 @@ public:
             if (i > 0)
                 island_rel[i] += island_rel[i - 1];
             const Island& island = islands[i];
-            optimise_island_1(island);
+            construct_island(island);
+//            optimise_island_1(island);
             optimise_island(island, int(TIME_LIMIT * island_rel[i] / tot));
         }
         //report_constraints();
-        //cerr << " it=" << opt_iter;
+        //cerr << " it=" << opt_iter << " ";
     }
     
     void report_constraints()
@@ -1235,6 +1237,164 @@ public:
             }
         }
         cerr << "sat=" << sat << " unsat=" << unsat << endl;
+    }
+
+    void construct_island(const Island& island)
+    {
+        // start from no connections
+        for (size_t i : island.nodes)
+            for (size_t j : island.nodes)
+                disconnect({ i, j }, true);
+
+        vector<PathDist> pds = island.paths;
+        vector<PathDist> unhandled;
+        shuffle(ALL(pds), re);
+        sort(ALL(pds), [](const PathDist& a, const PathDist& b) { return a.dist < b.dist; });
+
+        calc_apsp(island);
+        int algo = 0;
+        while (!pds.empty())
+        {
+            unhandled.clear();
+            bool added = false;
+            for (const PathDist& pd : pds)
+            {
+                bool ok = false;
+                if (algo == 0)
+                    ok = construct_direct_add(island, pd);
+                else if (algo == 1)
+                    ok = construct_indirect_add(island, pd);
+                else if (algo == 2)
+                    ok = construct_any_add(island, pd);
+                if (ok)
+                {
+                    added = true;
+                    algo = 0;
+                    calc_apsp(island);
+                }
+                else
+                {
+                    unhandled.push_back(pd);
+                }
+            }
+            if (!added)
+            {
+                algo++;
+                if (algo >= 3)
+                    break;  // for now
+            }
+            pds.swap(unhandled);
+        }
+    }
+
+    bool construct_direct_add(const Island& island, const PathDist& pd)
+    {
+        Pos p{ pd.from, pd.to };
+        if (apsp[p] == pd.dist)
+            return true;
+
+        if (pd.dist == 1)
+        {
+            disconnect(p, false);
+            return true;
+        }
+
+        auto try_connect = [&](size_t a, size_t b)
+        {
+            for (size_t i : island.nodes)
+            {
+                Pos ib{ i, b };
+                Pos ai{ a, i };
+                if (apsp[ib] == pd.dist - 1 && disconnected[ai])
+                {
+                    disconnect(ai, false);
+                    if (construct_constraints_ok(island, a))
+                        return true;
+                    else
+                        disconnect(ai, true);
+                }
+            }
+            return false;
+        };
+
+        if (try_connect(pd.from, pd.to))
+            return true;
+
+        if (try_connect(pd.to, pd.from))
+            return true;
+
+        return false;
+    }
+
+    bool construct_indirect_add(const Island& island, const PathDist& pd)
+    {
+        auto try_connect = [&](size_t a, size_t b)
+        {
+            for (size_t i : island.nodes)
+            {
+                Pos ib{ i, b };
+                if (apsp[ib] == pd.dist - 2)
+                {
+                    for (size_t j : island.nodes)
+                    {
+                        Pos ij{ i, j };
+                        Pos aj{ a, j };
+                        if (apsp[ij] >= int(island.nodes.size()))
+                        {
+                            disconnect(ij, false);
+                            bool aj_disconnected = disconnected[aj];
+                            if (aj_disconnected)
+                                disconnect(aj, false);
+                            if (construct_constraints_ok(island, a) && construct_constraints_ok(island, j))
+                                return true;
+                            else
+                            {
+                                disconnect(ij, true);
+                                if (aj_disconnected)
+                                    disconnect(aj, true);
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
+        };
+        
+        if (try_connect(pd.from, pd.to))
+            return true;
+
+        if (try_connect(pd.to, pd.from))
+            return true;
+
+        return false;
+    }
+
+    bool construct_any_add(const Island& island, const PathDist& pd)
+    {
+        Pos p{ pd.from, pd.to };
+        if (apsp[p] < int(island.nodes.size()))
+            return false;
+
+        Pos to_add = find_join(island, pd);
+        if (to_add == no_pos)
+            return false;
+        disconnect(to_add, false);
+        return true;
+    }
+
+    bool construct_constraints_ok(const Island& island, size_t node)
+    {
+        vector<PathDist> steps;
+        get_steps(island, node, steps);
+        vector<int> dist(N, N);
+        for (const PathDist& step : steps)
+            dist[step.to] = step.dist;
+        for (size_t i = 0; i < N; i++)
+        {
+            if (i != node && dist[i] < min_dist[{i, node}])
+                return false;
+        }
+        return true;
     }
 
     struct Change
@@ -1321,10 +1481,27 @@ public:
 
     Change shorten(const Island& island, const PathDist& path_dist, vector<Pos>& present, vector<Pos>& removed)
     {
+        Pos to_add = find_join(island, path_dist);
+        if (to_add == no_pos)
+            return { no_pos, no_pos };
+        if (to_add.x > to_add.y)
+            to_add = to_add.swapped();
+        auto where = find(ALL(removed), to_add);
+        if (where == removed.end())
+            return { no_pos, no_pos };
+        swap(*where, removed.back());
+        removed.pop_back();
+        present.push_back(to_add);
+        disconnect(to_add, false);
+        return { to_add, no_pos };
+    }
+
+    Pos find_join(const Island& island, const PathDist& path_dist)
+    {
         vector<PathDist> from_steps;
-        get_steps(island, path_dist.from, path_dist.to, from_steps);
+        get_steps(island, path_dist.from, from_steps);
         vector<PathDist> to_steps;
-        get_steps(island, path_dist.to, path_dist.from, to_steps);
+        get_steps(island, path_dist.to, to_steps);
         // pick a random join that sets the right length
 
         int count = 0;
@@ -1353,21 +1530,14 @@ public:
             }
         }
         if (!count)
-            return { no_pos, no_pos };
-        if (to_add.x > to_add.y)
-            to_add = to_add.swapped();
-        auto where = find(ALL(removed), to_add);
-        swap(*where, removed.back());
-        removed.pop_back();
-        present.push_back(to_add);
-        disconnect(to_add, false);
-        return { to_add, no_pos };
+            return no_pos;
+        return to_add;
     }
 
     Change lengthen(const Island& island, const PathDist& path_dist, vector<Pos>& present, vector<Pos>& removed)
     {
         vector<PathDist> steps;
-        get_steps(island, path_dist.from, path_dist.to, steps);
+        get_steps(island, path_dist.from, steps);
         // pick a random path element to remove
         PathDist to_remove;
         int count = 0;
@@ -1384,6 +1554,8 @@ public:
         if (r.x > r.y)
             r = r.swapped();
         auto where = find(ALL(present), r);
+        if (where == present.end())
+            return { no_pos, no_pos };
         swap(*where, present.back());
         present.pop_back();
         removed.push_back(r);
@@ -1391,7 +1563,7 @@ public:
         return { no_pos, r };
     }
 
-    void get_steps(const Island& island, size_t from, size_t to, vector<PathDist>& steps)
+    void get_steps(const Island& island, size_t from, vector<PathDist>& steps)
     {
         steps.clear();
         steps.push_back({ from, from, 0 });
@@ -1432,6 +1604,15 @@ public:
             int err = sp - pd.dist;
             score += err * err;
         }
+/*        for (const PathDist& pd : island.min_dists)
+        {
+            int sp = apsp[Pos(pd.from, pd.to)];
+            if (sp < pd.dist)
+            {
+                int err = sp - pd.dist;
+                score += err * err;
+            }
+        }*/
         //score += fraction_score();
         return score;
     }
@@ -1640,27 +1821,28 @@ double eval(int n)
 
 double last_score[] =
 {
-    0.100917,
+0.0900901,
+0.846154,
+0.322581,
+0.986842,
+0.411765,
+0.967742,
+0.222222,
 1,
-0.395604,
-0.315068,
-0.181818,
-1,
-0.168224,
-0.828571,
-0.767857,
-0.271186,
+0.948276,
+0.543478, 
 };
 
 void local()
 {
     double rel = 0;
-    int n = 10;
+    int n = 100;
     for (int i = 0; i < n; i++)
     {
         double sc = eval(i);
         cout << sc << "," << endl;
-        rel += sc / last_score[i];
+        if (i<sizeof(last_score)/sizeof(double))
+            rel += sc / last_score[i];
     }
     cout << rel/n << endl;
 }
