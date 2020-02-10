@@ -58,9 +58,11 @@ int getTime()
     tm += (t.tv_usec / 1000);
     return tm;
 }
-int milliseconds(bool /*reset*/ = false)
+int milliseconds(bool reset = false)
 {
     static int start = getTime();
+    if (reset)
+        start = getTime();
     int now = getTime();
     if (now < start)
         now += 60000;	// to account for minute rollover
@@ -1208,7 +1210,7 @@ public:
             construct_island(island);
             optimise_island(island, int(TIME_LIMIT * island_rel[i] / tot));
         }
-        //report_constraints();
+        report_constraints();
         //cerr << " it=" << opt_iter << " ";
     }
     
@@ -1222,7 +1224,7 @@ public:
             for (const PathDist& pd : island.paths)
             {
                 int sp = apsp[Pos(pd.from, pd.to)];
-                cerr << pd.from << " " << pd.to << " " << pd.dist << " " << sp << endl;
+        //        cerr << pd.from << " " << pd.to << " " << pd.dist << " " << sp << endl;
                 if (sp == pd.dist)
                     sat++;
                 else
@@ -1231,14 +1233,14 @@ public:
             for (const PathDist& pd : island.min_dists)
             {
                 int sp = apsp[Pos(pd.from, pd.to)];
-                cerr << "MD " << pd.from << " " << pd.to << " " << pd.dist << " " << sp << endl;
+        //        cerr << "MD " << pd.from << " " << pd.to << " " << pd.dist << " " << sp << endl;
                 if (sp >= pd.dist)
                     sat++;
                 else
                     unsat++;
             }
         }
-        cerr << "sat=" << sat << " unsat=" << unsat << endl;
+        //cerr << "sat=" << sat << " unsat=" << unsat << endl;
     }
 
     size_t construct_island(const Island& island)
@@ -1441,25 +1443,28 @@ public:
         int unchanged = 0;
         while (best_score > 0 && milliseconds() < time_limit)
         {
-            opt_iter++;
-            bool random = re() % 2;
-            Change change;
-            if (random)
-                change = random_mutation(present, removed);
-            else
-                change = targetted_change(island, present, removed);
-            double score = score_island(island);
-            if (score <= best_score)
+            for (int r=0; r<100; r++)
             {
-//                cout << ".";
-                unchanged = 0;
-                best_score = score;
-                best_present = present;
-                best_removed = removed;
+                opt_iter++;
+                bool random = re() % 2;
+                Change change;
+                if (random)
+                    change = random_mutation(present, removed);
+                else
+                    change = targetted_change(island, present, removed);
+                double score = score_island(island);
+                if (score <= best_score)
+                {
+    //                cout << ".";
+                    unchanged = 0;
+                    best_score = score;
+                    best_present = present;
+                    best_removed = removed;
+                }
+                else if (score > best_score + 3 || re() % 3)
+                    undo(change, present, removed);
+                unchanged++;
             }
-            else if (score > best_score + 3 || re() % 3)
-                undo(change, present, removed);
-            unchanged++;
         }
         //cout << best_score << " " << island.nodes.size() << endl;
         //cout << " unchanged=" << unchanged << " " << endl;
