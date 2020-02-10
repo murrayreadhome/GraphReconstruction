@@ -941,6 +941,9 @@ public:
         C = aC;
         K = aK;
 
+        get_steps_seen.resize(N, N);
+        apsp_seen.resize(N, 0);
+
         max_edges = N * (N - 1);
         target_num_connected = max_edges * C;
 
@@ -1385,14 +1388,17 @@ public:
         return true;
     }
 
+    vector<PathDist> construct_constraints_ok_steps;
     bool construct_constraints_ok(const Island& island, size_t node)
     {
-        vector<PathDist> steps;
-        get_steps(island, node, steps);
-        vector<int> dist(N, N);
-        for (const PathDist& step : steps)
+        construct_constraints_ok_steps.clear();
+        get_steps(island, node, construct_constraints_ok_steps);
+        int dist[100];
+        for (size_t i : island.nodes)
+            dist[i] = N;
+        for (const PathDist& step : construct_constraints_ok_steps)
             dist[step.to] = step.dist;
-        for (size_t i = 0; i < N; i++)
+        for (size_t i : island.nodes)
         {
             if (i != node && dist[i] < min_dist[{i, node}])
                 return false;
@@ -1504,20 +1510,22 @@ public:
         return { to_add, no_pos };
     }
 
+    vector<PathDist> from_find_join_steps;
+    vector<PathDist> to_find_join_steps;
     Pos find_join(const Island& island, const PathDist& path_dist)
     {
-        vector<PathDist> from_steps;
-        get_steps(island, path_dist.from, from_steps);
-        vector<PathDist> to_steps;
-        get_steps(island, path_dist.to, to_steps);
+        from_find_join_steps.clear();
+        get_steps(island, path_dist.from, from_find_join_steps);
+        to_find_join_steps.clear();
+        get_steps(island, path_dist.to, to_find_join_steps);
         // pick a random join that sets the right length
 
         int count = 0;
         int best_err = 1000;
         Pos to_add;
-        for (const PathDist& from_step : from_steps)
+        for (const PathDist& from_step : from_find_join_steps)
         {
-            for (const PathDist& to_step : to_steps)
+            for (const PathDist& to_step : to_find_join_steps)
             {
                 Pos p{ from_step.to, to_step.to };
                 if (min_dist[p] > 1)
@@ -1542,14 +1550,15 @@ public:
         return to_add;
     }
 
+    vector<PathDist> lengthen_steps;
     Change lengthen(const Island& island, const PathDist& path_dist, vector<Pos>& present, vector<Pos>& removed)
     {
-        vector<PathDist> steps;
-        get_steps(island, path_dist.from, steps);
+        lengthen_steps.clear();
+        get_steps(island, path_dist.from, lengthen_steps);
         // pick a random path element to remove
         PathDist to_remove;
         int count = 0;
-        for (const PathDist& step : steps)
+        for (const PathDist& step : lengthen_steps)
         {
             if (step.dist <= path_dist.dist && step.dist != 0)
             {
@@ -1571,34 +1580,38 @@ public:
         return { no_pos, r };
     }
 
+    vector<int> get_steps_seen;
+    vector<size_t> get_steps_now, get_steps_next;
+
     void get_steps(const Island& island, size_t from, vector<PathDist>& steps)
     {
         steps.clear();
         steps.push_back({ from, from, 0 });
-        vector<int> seen(N, N);
-        seen[from] = from;
-        vector<size_t> now, next;
-        now.push_back(from);
+        for (size_t n : island.nodes)
+            get_steps_seen[n] = N;
+        get_steps_seen[from] = from;
+        get_steps_now.clear();
+        get_steps_now.push_back(from);
         int dist = 1;
-        while (!now.empty())
+        while (!get_steps_now.empty())
         {
-            next.clear();
-            for (size_t f : now)
+            get_steps_next.clear();
+            for (size_t f : get_steps_now)
             {
                 for (size_t to = 0; to < N; to++)
                 {
-                    if (seen[to] < dist)
+                    if (get_steps_seen[to] < dist)
                         continue;
                     if (disconnected[{from, to}])
                         continue;
                     steps.push_back({ f,to,dist });
-                    if (seen[to] > dist)
-                        next.push_back(to);
-                    seen[to] = dist;
+                    if (get_steps_seen[to] > dist)
+                        get_steps_next.push_back(to);
+                    get_steps_seen[to] = dist;
                 }
             }
             dist++;
-            now.swap(next);
+            get_steps_now.swap(get_steps_next);
         }
     }
 
@@ -1621,14 +1634,20 @@ public:
                 score += abs(err);// *err;
             }
         }
-        //score += fraction_score();
+        //score += fraction_score(island);
         return score;
     }
 
-    double fraction_score()
+    double fraction_score(const Island& island)
     {
-        size_t edges = count(disconnected.begin(), disconnected.end(), 0);
+        size_t edges = 0;
+        for (size_t i : island.nodes)
+            for (size_t j : island.nodes)
+                if (!disconnected[{i,j}])
+                    edges++;
         double f_connected = edges * 1.0 / max_edges;
+        size_t n = island.nodes.size();
+        double target_num_connected = n * (n-1) * C;
         double diff = abs(f_connected - target_num_connected);
         return diff / target_num_connected;
     }
@@ -1734,7 +1753,7 @@ public:
         shuffle(removable.begin(), removable.end(), re);
         bool rules_satisfied = false;
         bool ok_at_start = check_constraints(island, rules_satisfied);
-        if (!ok_at_start) cerr << "not ok at start??!" << endl;
+        if (!ok_at_start) cerr << "not ok at start!" << endl;
         while (!removable.empty() && !rules_satisfied)
         {
             Pos remove = removable.back();
@@ -1750,44 +1769,59 @@ public:
         //cerr << rules_satisfied << " " << island.nodes.size() << endl;
     }
 
-    Grid<int> apsp;  // todo optimise
+    Grid<int> apsp;
+    vector<vector<size_t>> apsp_edges;
+    vector<int> apsp_seen;
+    vector<size_t> apsp_now, apsp_next;
 
     void calc_apsp(const Island& island)
     {
-        apsp.init(N, N, island.nodes.size()+1);  // todo optimise
+        int apsp_no_path = island.nodes.size()+1;
+        if (apsp.width < N || island.nodes.size()*2 >= N)
+        {
+            apsp.init(N, N, apsp_no_path);
+        }
+        else
+        {
+            for (size_t i : island.nodes)
+                for (size_t j : island.nodes)
+                    apsp[{i,j}] = apsp_no_path;
+        }
 
-        vector<vector<size_t>> edges(N);
-        for (size_t i : island.nodes)
-            for (size_t j : island.nodes)
-                if (!disconnected[{i, j}])
-                    edges[i].push_back(j);
-
-        vector<int> seen;
-        vector<size_t> now, next;
+        if (apsp_edges.empty())
+            apsp_edges.resize(N);
         for (size_t i : island.nodes)
         {
-            seen.clear();
-            seen.resize(N, 0);
-            seen[i] = 1;
-            now.clear();
-            now.push_back(i);
+            apsp_edges[i].clear();
+            for (size_t j : island.nodes)
+                if (!disconnected[{i, j}])
+                    apsp_edges[i].push_back(j);
+        }
+
+        for (size_t i : island.nodes)
+        {
+            for (size_t n : island.nodes)
+                apsp_seen[n] = 0;
+            apsp_seen[i] = 1;
+            apsp_now.clear();
+            apsp_now.push_back(i);
             int dist = 1;
-            while (!now.empty())
+            while (!apsp_now.empty())
             {
-                next.clear();
-                for (size_t j : now)
+                apsp_next.clear();
+                for (size_t j : apsp_now)
                 {
-                    for (size_t k : edges[j])
+                    for (size_t k : apsp_edges[j])
                     {
-                        if (seen[k])
+                        if (apsp_seen[k])
                             continue;
-                        seen[k] = 1;
-                        next.push_back(k);
+                        apsp_seen[k] = 1;
+                        apsp_next.push_back(k);
                         apsp[{i, k}] = dist;
                     }
                 }
                 dist++;
-                now.swap(next);
+                apsp_now.swap(apsp_next);
             }
         }
     }
