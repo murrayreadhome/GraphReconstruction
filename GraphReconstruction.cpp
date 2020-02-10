@@ -1206,7 +1206,6 @@ public:
                 island_rel[i] += island_rel[i - 1];
             const Island& island = islands[i];
             construct_island(island);
-//            optimise_island_1(island);
             optimise_island(island, int(TIME_LIMIT * island_rel[i] / tot));
         }
         //report_constraints();
@@ -1729,44 +1728,6 @@ public:
             disconnect(p, false);
         for (const Pos& p : removed)
             disconnect(p, true);
-    }
-
-
-    void optimise_island_1(const Island& island)
-    {
-        // initially all nodes are connected, except those we know can't be
-        // how to optimise?
-        // eliminate edges randomly
-        // track which ones break the rules (cause disconnect or greater path)
-        // stop when all rules are matched exactly, or no more edges can be removed
-        // redo until timeout, keep best
-        // this never satisfies a non trivial rules set
-        // COULD MAYBE... evaluate how badly the constraints are broken, and SA to improve that down to zero?
-        size_t M = island.nodes.size();
-        vector<Pos> removable;
-        for (size_t i : island.nodes)
-            for (size_t j : island.nodes)
-                if (i<j && !disconnected[Pos(i,j)])
-                    removable.push_back(Pos(i,j));
-        // todo track what was disconnected and restore it for a retry
-        // totry identify troublesome edges and leave the rest alone? 
-        shuffle(removable.begin(), removable.end(), re);
-        bool rules_satisfied = false;
-        bool ok_at_start = check_constraints(island, rules_satisfied);
-        if (!ok_at_start) cerr << "not ok at start!" << endl;
-        while (!removable.empty() && !rules_satisfied)
-        {
-            Pos remove = removable.back();
-            removable.pop_back();
-            disconnect(remove, true);
-            bool ok = check_constraints(island, rules_satisfied);
-            if (!ok)
-            {
-                rules_satisfied = false;
-                disconnect(remove, false);
-            }
-        }
-        //cerr << rules_satisfied << " " << island.nodes.size() << endl;
     }
 
     Grid<int> apsp;
