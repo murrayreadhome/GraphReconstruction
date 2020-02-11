@@ -1743,7 +1743,7 @@ public:
     void calc_apsp(const Island& island)
     {
         int apsp_no_path = island.nodes.size()+1;
-        if (apsp.width < N || island.nodes.size()*2 >= N)
+        if (apsp.width < int(N) || island.nodes.size()*2 >= N)
         {
             apsp.init(N, N, apsp_no_path);
         }
