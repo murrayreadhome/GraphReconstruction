@@ -1256,6 +1256,7 @@ public:
         sort(ALL(pds), [](const PathDist& a, const PathDist& b) { return a.dist < b.dist; });
 
         calc_apsp(island);
+        auto dyn_min_dist = min_dist;
         int algo = 0;
         while (!pds.empty())
         {
@@ -1265,11 +1266,11 @@ public:
             {
                 bool ok = false;
                 if (algo == 0)
-                    ok = construct_direct_add(island, pd);
+                    ok = construct_direct_add(island, pd, dyn_min_dist);
                 else if (algo == 1)
-                    ok = construct_indirect_add(island, pd);
+                    ok = construct_indirect_add(island, pd, dyn_min_dist);
                 else if (algo == 2)
-                    ok = construct_any_add(island, pd);
+                    ok = construct_any_add(island, pd, dyn_min_dist);
                 if (ok)
                 {
                     added = true;
@@ -1294,7 +1295,7 @@ public:
         return unhandled.size();
     }
 
-    bool construct_direct_add(const Island& island, const PathDist& pd)
+    bool construct_direct_add(const Island& island, const PathDist& pd, Grid<int>& dyn_min_dist)
     {
         Pos p{ pd.from, pd.to };
         if (apsp[p] == pd.dist)
@@ -1315,8 +1316,12 @@ public:
                 if (apsp[ib] == pd.dist - 1 && disconnected[ai])
                 {
                     disconnect(ai, false);
-                    if (construct_constraints_ok(island, a))
+                    if (construct_constraints_ok(island, a, dyn_min_dist) && construct_constraints_ok(island, i, dyn_min_dist))
+                    {
+                        join_min_dist(island, dyn_min_dist, a, i);
+                        join_min_dist(island, dyn_min_dist, i, a);
                         return true;
+                    }
                     else
                         disconnect(ai, true);
                 }
@@ -1333,7 +1338,7 @@ public:
         return false;
     }
 
-    bool construct_indirect_add(const Island& island, const PathDist& pd)
+    bool construct_indirect_add(const Island& island, const PathDist& pd, Grid<int>& dyn_min_dist)
     {
         auto try_connect = [&](size_t a, size_t b)
         {
@@ -1352,8 +1357,16 @@ public:
                             bool aj_disconnected = disconnected[aj];
                             if (aj_disconnected)
                                 disconnect(aj, false);
-                            if (construct_constraints_ok(island, a) && construct_constraints_ok(island, j))
+                            if (construct_constraints_ok(island, a, dyn_min_dist) && 
+                                construct_constraints_ok(island, j, dyn_min_dist) && 
+                                construct_constraints_ok(island, i, dyn_min_dist))
+                            {
+                                join_min_dist(island, dyn_min_dist, a, j);
+                                join_min_dist(island, dyn_min_dist, j, a);
+                                join_min_dist(island, dyn_min_dist, i, j);
+                                join_min_dist(island, dyn_min_dist, j, i);
                                 return true;
+                            }
                             else
                             {
                                 disconnect(ij, true);
@@ -1376,7 +1389,7 @@ public:
         return false;
     }
 
-    bool construct_any_add(const Island& island, const PathDist& pd)
+    bool construct_any_add(const Island& island, const PathDist& pd, Grid<int>& dyn_min_dist)
     {
         Pos p{ pd.from, pd.to };
         if (apsp[p] < int(island.nodes.size()))
@@ -1385,12 +1398,19 @@ public:
         Pos to_add = find_join(island, pd);
         if (to_add == no_pos)
             return false;
-        disconnect(to_add, false);
-        return true;
+        if (construct_constraints_ok(island, to_add.x, dyn_min_dist) && construct_constraints_ok(island, to_add.y, dyn_min_dist))
+        {
+            join_min_dist(island, dyn_min_dist, to_add.x, to_add.y);
+            join_min_dist(island, dyn_min_dist, to_add.y, to_add.x);
+            disconnect(to_add, false);
+            return true;
+        }
+        else
+            return false;
     }
 
     vector<PathDist> construct_constraints_ok_steps;
-    bool construct_constraints_ok(const Island& island, size_t node)
+    bool construct_constraints_ok(const Island& island, size_t node, Grid<int>& dyn_min_dist)
     {
         construct_constraints_ok_steps.clear();
         get_steps(island, node, construct_constraints_ok_steps);
@@ -1401,10 +1421,28 @@ public:
             dist[step.to] = step.dist;
         for (size_t i : island.nodes)
         {
-            if (i != node && dist[i] < min_dist[{i, node}])
+            if (i != node && dist[i] < dyn_min_dist[{i, node}])
                 return false;
         }
         return true;
+    }
+
+    void join_min_dist(const Island& island, Grid<int>& dyn_min_dist, size_t from, size_t to)
+    {
+        construct_constraints_ok_steps.clear();
+        get_steps(island, to, construct_constraints_ok_steps);
+        int dist[100];
+        for (size_t i : island.nodes)
+            dist[i] = N;
+        for (size_t i : island.nodes)
+        {
+            for (size_t j : island.nodes)
+            {
+                dyn_min_dist[{i, j}] =
+                    dyn_min_dist[{j, i}] =
+                    max(dyn_min_dist[{from, j}] - 1 - dist[i], dyn_min_dist[{i, j}]);
+            }
+        }
     }
 
     struct Change

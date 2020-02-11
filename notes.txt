@@ -2,3 +2,9 @@ try
 node swap mutations (will need a change type record)
 soft constraints on min distances
 maybe soft constraints on max dist
+
+add nodes rather than paths
+add nodes in order from most to least constrained, and most central first
+find most compatible min dist when adding
+make propagation more efficient by stopping when min dist gets to 1
+
