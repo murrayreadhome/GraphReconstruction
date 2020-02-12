@@ -1304,6 +1304,8 @@ public:
         if (pd.dist == 1)
         {
             disconnect(p, false);
+            join_min_dist(island, dyn_min_dist, p.x, p.y);
+            join_min_dist(island, dyn_min_dist, p.y, p.x);
             return true;
         }
 
@@ -1340,10 +1342,10 @@ public:
         return false;
     }
 
+    vector<EdgeDist> obmdc_ed;
     void order_by_min_dist_compatibility(const Grid<int>& dyn_min_dist, vector<size_t>& nodes, size_t n)
     {
-        vector<EdgeDist> ed;
-        ed.reserve(nodes.size());
+        obmdc_ed.clear();
         for (size_t i : nodes)
         {
             int dist = 0;
@@ -1358,11 +1360,11 @@ public:
                     diff = 1;
                 dist += max(abs(diff)-1,1);
             }
-            ed.push_back({i, dist});
+            obmdc_ed.push_back({i, dist});
         }
-        sort(ALL(ed), [](const EdgeDist& a, const EdgeDist& b){return a.dist < b.dist;});
+        sort(ALL(obmdc_ed), [](const EdgeDist& a, const EdgeDist& b){return a.dist < b.dist;});
         nodes.clear();
-        for (const EdgeDist& e : ed)
+        for (const EdgeDist& e : obmdc_ed)
             nodes.push_back(e.to);
     }
 
@@ -1457,6 +1459,7 @@ public:
         return true;
     }
 
+    vector<size_t> jmd_ordered_nodes;
     void join_min_dist(const Island& island, Grid<int>& dyn_min_dist, size_t from, size_t to)
     {
         construct_constraints_ok_steps.clear();
@@ -1464,13 +1467,25 @@ public:
         int dist[100];
         for (size_t i : island.nodes)
             dist[i] = N;
+        for (const auto& step : construct_constraints_ok_steps)
+            dist[step.to] = step.dist;
+        jmd_ordered_nodes = island.nodes;
+        sort(ALL(jmd_ordered_nodes), [&](size_t a, size_t b) {return dyn_min_dist[{from, a}] > dyn_min_dist[{from, b}]; });
         for (size_t i : island.nodes)
         {
-            for (size_t j : island.nodes)
+            for (size_t j : jmd_ordered_nodes)
             {
-                dyn_min_dist[{i, j}] =
-                    dyn_min_dist[{j, i}] =
-                    max(dyn_min_dist[{from, j}] - 1 - dist[i], dyn_min_dist[{i, j}]);
+                if (i == j)
+                    continue;
+                int new_dist = dyn_min_dist[{from, j}] - 1 - dist[i];
+                if (new_dist <= 1)
+                    break;
+                int& dij = dyn_min_dist[{i, j}];
+                if (new_dist > dij)
+                {
+                    dij = new_dist;
+                    dyn_min_dist[{j, i}] = dij;
+                }
             }
         }
     }
@@ -1897,106 +1912,106 @@ double eval(int n)
 
 double last_score[] =
 {
-0.115385,
+0.152381,
 0.909091,
-0.351648,
+0.449438,
 0.986842,
-0.449612,
+0.515152,
 1,
-0.230769,
-1,
+0.392157,
+0.984615,
 0.973451,
-0.715909,
-0.405405,
-0.603774,
-0.491667,
-0.9,
-0.831683,
-0.691358,
-0.22549,
-0.201058,
-0.974359,
-0.113636,
+0.791209,
+0.555556,
 0.4,
-0.893617,
-0.642857,
-0.965517,
-0.431373,
-0.300971,
-0.918919,
-0.423077,
-0.842105,
-0.979167,
-0.689655,
-0.925926,
-0.873239,
-0.29703,
-0.546512,
-0.92,
-0.557823,
+0.764228,
 0.9,
+0.871287,
+0.404762,
+0.275862,
+0.302703,
+0.974359,
+0.136364,
+0.317881,
+0.893617,
+0.711864,
+0.965517,
+0.531646,
+0.358491,
+0.931507,
+0.541985,
+0.942857,
+0.969072,
+0.561798,
+0.90566,
+0.724638,
+0.185567,
+0.666667,
+0.956522,
+0.611111,
+0.848,
 1,
-0.628821,
+0.696833,
 1,
 0.75,
-0.631016,
-0.965517,
-0.649351,
-0.948454,
-0.2125,
-0.368794,
-0.306383,
-0.709091,
+0.867725,
+0.949153,
+0.564103,
+0.959184,
+0.165605,
+0.314286,
+0.492063,
+0.8,
 0.923077,
 1,
 0.866667,
-0.915033,
-0.293578,
-0.208,
-0.844156,
-0.08,
-0.243902,
+0.89441,
+0.446429,
+0.169355,
+0.953642,
+0.0512821,
+0.276423,
 0.344828,
-0.761905,
-0.747253,
+0.787879,
+0.731183,
 0.956522,
-0.9,
-0.611111,
+0.87931,
+0.513514,
 0.25,
 0.628571,
-0.372414,
+0.322148,
 0.916667,
-0.260536,
-0.516129,
-0.885714,
-1,
-0.0740741,
-0.725664,
+0.358974,
+0.410811,
+0.873239,
+0.974359,
+0.0992908,
+0.728814,
 0.56,
-0.469799,
-0.896552,
-0.614286,
-0.932039,
+0.520548,
+0.83871,
+0.529412,
+0.854369,
 0.97561,
-0.876404,
-0.163743,
-0.724638,
-0.909091,
-0.87234,
-0.150538,
+0.888889,
+0.275862,
+0.746269,
+0.666667,
+0.68,
+0.222222,
 0.954545,
-0.904459,
+0.911392,
 1,
-0.294737,
-0.477612,
-0.25974,
+0.255319,
+0.382353,
+0.233333,
 0.878049,
-0.392157,
-0.229508,
-0.886076,
-0.967742,
-0.117647,
-0.220588,
+0.5,
+0.258065,
+0.925,
+0.943396,
+0.149733,
+0.285714,
 };
 
 void local()

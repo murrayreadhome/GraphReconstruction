@@ -12,3 +12,10 @@ make propagation more efficient by stopping when min dist gets to 1. eg
 make a vector of EdgeDist for FJ, only > 2, sorted biggest first, 
 then can stop when IT dist > limit in that list
 
+  1
+ T-F
+d| |m
+ I~J
+  ?
+
+IJ>=m-1-d
