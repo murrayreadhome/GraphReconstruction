@@ -1309,7 +1309,9 @@ public:
 
         auto try_connect = [&](size_t a, size_t b)
         {
-            for (size_t i : island.nodes)
+            auto nodes = island.nodes;
+            order_by_min_dist_compatibility(dyn_min_dist, nodes, a);
+            for (size_t i : nodes)
             {
                 Pos ib{ i, b };
                 Pos ai{ a, i };
@@ -1338,16 +1340,44 @@ public:
         return false;
     }
 
+    void order_by_min_dist_compatibility(const Grid<int>& dyn_min_dist, vector<size_t>& nodes, size_t n)
+    {
+        vector<EdgeDist> ed;
+        ed.reserve(nodes.size());
+        for (size_t i : nodes)
+        {
+            int dist = 0;
+            for (size_t j=0; j<N; j++)
+            {
+                if (j==n || j==i)
+                    continue;
+                int dij = dyn_min_dist[{i,j}];
+                int din = dyn_min_dist[{i,n}];
+                int diff = dij - din;
+                if (dij<=1 || din<=1)
+                    diff = 1;
+                dist += max(abs(diff)-1,1);
+            }
+            ed.push_back({i, dist});
+        }
+        sort(ALL(ed), [](const EdgeDist& a, const EdgeDist& b){return a.dist < b.dist;});
+        nodes.clear();
+        for (const EdgeDist& e : ed)
+            nodes.push_back(e.to);
+    }
+
     bool construct_indirect_add(const Island& island, const PathDist& pd, Grid<int>& dyn_min_dist)
     {
         auto try_connect = [&](size_t a, size_t b)
         {
-            for (size_t i : island.nodes)
+            auto nodes = island.nodes;
+            order_by_min_dist_compatibility(dyn_min_dist, nodes, a);
+            for (size_t i : nodes)
             {
                 Pos ib{ i, b };
                 if (apsp[ib] == pd.dist - 2)
                 {
-                    for (size_t j : island.nodes)
+                    for (size_t j : nodes)
                     {
                         Pos ij{ i, j };
                         Pos aj{ a, j };
@@ -2023,6 +2053,8 @@ void record(int argc, char** argv)
 int main(int argc, char** argv)
 {
 #ifdef TESTING_AT_HOME
+    string mode = "local";
+#elif defined(TESTING_ON_LINUX)
     string mode = "local";
 #else
     string mode = "stdio";

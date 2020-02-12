@@ -2,8 +2,10 @@ GraphReconstruction.code-workspace
 GraphReconstruction.cpp.zip
 tester/GraphReconstructionVis.java
 tester/tester (1).jar
+.vscode/
 .vscode/launch.json
 .vscode/tasks.json
+build/
 build/cmake_install.cmake
 build/CMakeCache.txt
 build/compile_commands.json

@@ -4,8 +4,11 @@ soft constraints on min distances
 maybe soft constraints on max dist
 
 add nodes rather than paths
-add nodes in order from most to least constrained, and most central first. where central is any node where max min_dist <= half total max min_dist
+add nodes in order from most to least constrained, and most central first. 
+where central is any node where max min_dist <= half total max min_dist
 constraints on nodes are updated dynamically
 find most compatible min dist when adding
-make propagation more efficient by stopping when min dist gets to 1. eg make a vector of EdgeDist for FJ, only > 2, sorted biggest first, then can stop when IT dist > limit in that list
+make propagation more efficient by stopping when min dist gets to 1. eg 
+make a vector of EdgeDist for FJ, only > 2, sorted biggest first, 
+then can stop when IT dist > limit in that list
 
